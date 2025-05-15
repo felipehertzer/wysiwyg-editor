@@ -1,5 +1,5 @@
 /*!
- * froala_editor v4.4.0 (https://www.froala.com/wysiwyg-editor)
+ * froala_editor v4.5.2 (https://www.froala.com/wysiwyg-editor)
  * License https://froala.com/wysiwyg-editor/terms/
  * Copyright 2014-2025 Froala Labs
  */
@@ -594,6 +594,52 @@
   background-color: #F0F0F0; }
 .gray-theme body.fr-fullscreen .fs-transforms-container {
   z-index: 2247483660; }
+.gray-theme .fr-find-replace-layer h3 {
+  margin: 0; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-input-line input#fr-replaceText::placeholder {
+  color: #a9a9a9; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-toggle-advanced-options {
+  width: auto; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-separator {
+  margin: 10px 0;
+  border-top: 1px solid #e0e0e0; }
+.gray-theme .fr-find-replace-layer .fr-body input {
+  border: 1px solid #CCCCCC; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-button-group button.fr-find-btn {
+  background-color: #FFF;
+  color: #0097A7;
+  border: 1px solid #0097A7; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-button-group button.fr-replace-btn {
+  background-color: #FFF;
+  color: #0097A7; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-button-group button.fr-replace-all-btn {
+  background-color: #FFF;
+  color: #0097A7; }
+.gray-theme .fr-find-replace-layer .fr-body #fr-findText {
+  border: 1px solid #CCCCCC; }
+.gray-theme .fr-find-replace-layer .fr-body #fr-findText:focus {
+  border: 2px solid #0097A7; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-find-error {
+  color: #f70000; }
+.gray-theme .fr-find-replace-layer .fr-body #fr-findText.error {
+  border-color: #f70000; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-count-indicator {
+  z-index: 10; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-toggle-advanced-options .arrow {
+  font-weight: 100; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-advanced-options-panel .fr-checkbox-group .fr-checkbox-item input[type="checkbox"] {
+  margin-left: 0;
+  margin-right: 0;
+  margin-top: 0;
+  position: inherit; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-toggle-btn {
+  background-color: #CCCCCC; }
+.gray-theme .fr-find-replace-layer .fr-body .fr-btn-active-popup {
+  background: gainsboro; }
+.gray-theme .fr-find-replace-highlight {
+  background-color: #ffff00; }
+.gray-theme .fr-find-replace-current-highlight {
+  background-color: #ffa500; }
 .gray-theme.fr-box.fr-fullscreen {
   top: 0;
   left: 0;
@@ -978,6 +1024,9 @@
     width: 368px; } }
 .gray-theme .fr-element table td.fr-selected-cell, .gray-theme .fr-element table th.fr-selected-cell {
   border: 1px double #0097A7; }
+.gray-theme .fr-element table td.fr-selected-cell:after, .gray-theme .fr-element table th.fr-selected-cell:after {
+  top: 0;
+  left: 0; }
 .gray-theme .fr-element table td, .gray-theme .fr-element table th {
   user-select: text;
   -o-user-select: text;
@@ -1005,6 +1054,32 @@
   -khtml-user-select: none;
   -webkit-user-select: none;
   -ms-user-select: none; }
+.gray-theme .fr-table-selector {
+  width: 16px;
+  height: 16px;
+  padding: 3px;
+  border: transparent 2px solid;
+  border-radius: 4px 4px 0 0; }
+  .gray-theme .fr-table-selector a {
+    width: 16px;
+    height: 16px; }
+    .gray-theme .fr-table-selector a > svg {
+      width: 16px;
+      height: 16px; }
+.gray-theme .fr-table-selector-active {
+  border: #fdcf00 2px solid; }
+  .gray-theme .fr-table-selector-active a > svg {
+    color: #fdcf00; }
+.gray-theme .fr-table-selector-active-selected {
+  border: #0d65ff 2px solid; }
+  .gray-theme .fr-table-selector-active-selected a > svg {
+    color: #0d65ff; }
+.gray-theme .fr-table-selector-inactive {
+  opacity: 0; }
+.gray-theme .fr-view .fr-table-selection-hover {
+  outline: #fdcf00 2px solid; }
+.gray-theme .fr-view .fr-table-selected {
+  outline: #0d65ff 2px solid; }
 .gray-theme.fr-popup .fr-table-size {
   margin: 20px; }
   .gray-theme.fr-popup .fr-table-size .fr-select-table-size {
