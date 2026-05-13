@@ -19,3 +19,7 @@ Version: 2.0.5
 Site: https://github.com/eligrey/FileSaver.js#readme
 License: https://github.com/eligrey/FileSaver.js?tab=License-1-ov-file#readme
 
+filerobot-image-editor (MIT)
+Version: 4.8.1
+Site: https://github.com/scaleflex/filerobot-image-editor#readme
+License: https://github.com/scaleflex/filerobot-image-editor?tab=MIT-1-ov-file

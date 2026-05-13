@@ -49,6 +49,7 @@ declare module "froala-editor" {
     helpers: Helpers;
     html: HTML;
     image: Image;
+    imageFilerobot: ImageFilerobot;
     inlineClass: InlineClass;
     inlineStyle: InlineStyle;
     keys: Keys;
@@ -550,6 +551,7 @@ declare module "froala-editor" {
       'Something went wrong. Please try again.': string,
       'Image Caption': string,
       'Advanced Edit': string,
+      'Advanced Edit (File-Robot)': string,
 
       // Video
       'Insert Video': string,
@@ -1413,6 +1415,7 @@ declare module "froala-editor" {
 
     // Lists
     listAdvancedTypes: boolean;
+    preserveListLineOnBackspace: boolean;
 
     // Quick Insert
     quickInsertButtons: string[];
@@ -1534,6 +1537,10 @@ declare module "froala-editor" {
     // Code Snippet
     codeSnippetLanguage: { [key: string]: string };
     codeSnippetDefaultLanguage: string;
+
+    // Filerobot
+    filerobotOptions: FilerobotOptions;
+    FilerobotImageEditor: any;
   }
 
   export interface FroalaEvents {
@@ -1694,6 +1701,12 @@ declare module "froala-editor" {
     // import from word
     'word.beforeImport': (this: FroalaEditor, file: object) => string;
     'word.afterImport': (this: FroalaEditor, html: string) => void;
+    // Filerobot events
+    'filerobot.beforeOpen': (this: FroalaEditor) => boolean;
+    'filerobot.opened': (this: FroalaEditor, filerobotInstance: any) => void;
+    'filerobot.closed': (this: FroalaEditor) => void;
+    'filerobot.beforeSave': (this: FroalaEditor, editedImageObject: FilerobotImageObject) => boolean;
+    'filerobot.saved': (this: FroalaEditor, editedImageObject: FilerobotImageObject) => void;
   }
 
   export interface FilesManager {
@@ -1755,7 +1768,7 @@ declare module "froala-editor" {
     remove(image: any): object;
     setAlt(alternateText: string): object;
     setSize(width: string, height: string): object;
-    upload(images: any[]): object;
+    upload(images: any[], $image_placeholder: any, extra_params: any): object;
     insertByURL(): void;
     refreshAlign($btn: any): void;
     refreshAlignOnShow($btn: any): void;
@@ -1773,6 +1786,11 @@ declare module "froala-editor" {
     exitEdit(force_exit: boolean): boolean;
     edit($img: any): void;
     [key: string]: (...args: any[]) => any;
+  }
+
+  export interface ImageFilerobot {
+    _init(): void;
+    launch(editor: FroalaEditor, callFromImagePlugin: boolean): void;
   }
 
   export interface CharCounter {
@@ -2576,6 +2594,31 @@ declare module "froala-editor" {
   export interface AiAssist {
     _init(): void;
     showPromptPopup(): void;
+  }
+
+  export interface FilerobotOptions {
+    theme: any;
+    annotationsCommon: any;
+    Text: any;
+    Rotate: any;
+    tabsIds: string[];
+    defaultTabId: string;
+    defaultToolId: string;
+    savingPixelRatio: number;
+    previewPixelRatio: number;
+    closeAfterSave: boolean;
+    defaultSavedImageType: string;
+    [key: string]: any;
+  }
+
+  export interface FilerobotImageObject {
+    fullName: string;
+    name: string;
+    extension: string;
+    mimeType: string;
+    height: number;
+    width: number;
+    [key: string]: any;
   }
 
   type AiAssistOption = {
