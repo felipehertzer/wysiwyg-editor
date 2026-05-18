@@ -4,22 +4,6 @@
  * Copyright 2014-2026 Froala Labs
  */
 
-.fr-clearfix::after {
-  clear: both;
-  display: block;
-  content: "";
-  height: 0; }
-
-.fr-hide-by-clipping {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  border: 0; }
-
 .dark-theme .fr-license {
   z-index: 1000;
   padding: 20px;
