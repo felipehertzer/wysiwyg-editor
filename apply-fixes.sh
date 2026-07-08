@@ -7,6 +7,7 @@
 #   2. word_paste.min.js — Preserve "data-fr-image-pasted" during paste cleanup
 #   3. dark.css          — Remove unscoped .fr-clearfix / .fr-hide-by-clipping rules
 #   4. dark.min.css      — Same as above (minified version)
+#   5. image.min.js      — Re-mark pasted images after cleanup so uploads always run
 #
 # Usage:
 #   ./apply-fixes.sh
@@ -125,6 +126,52 @@ apply_fix(
     ),
     '',
     lambda c: '.fr-clearfix::after' not in c
+)
+
+
+# ── Fix 5: image.min.js — re-mark pasted images after cleanup ──────────────
+#
+# The image plugin marks pasted <img> tags in paste.beforeCleanup, but Froala's
+# cleanup can remove that internal data attribute when htmlAllowedAttrs is
+# customized. Re-marking uploadable images in paste.afterCleanup keeps
+# paste.after deterministic without requiring app-level sanitizer knowledge.
+
+apply_fix(
+    "js/plugins/image.min.js",
+    'image.min.js: re-mark pasted images after cleanup',
+    re.compile(
+        r'(function be\(e\)\{e=e\.replace\(/<img /gi,\'<img data-fr-image-pasted="true" \'\);'
+        r'var t=S\.doc\.createElement\("div"\);return t\.innerHTML=e,d=0<t\.textContent\.trim\(\)\.length,e\})'
+        r'(function \w+\(e\)\{)'
+    ),
+    lambda m: (
+        m[1]
+        + 'function pe(e){var t=S.doc.createElement("div");t.innerHTML=e;'
+        + 'for(var a=t.querySelectorAll("img"),i=0;i<a.length;i++){'
+        + 'var n=a[i].getAttribute("src")||"";'
+        + '(0===n.indexOf("data:")||0===n.indexOf("blob:")||0===n.indexOf("http"))'
+        + '&&a[i].setAttribute("data-fr-image-pasted","true")}'
+        + 'return t.innerHTML}'
+        + m[2]
+    ),
+    lambda c: 'function pe(e){var t=S.doc.createElement("div");t.innerHTML=e;' in c
+)
+
+apply_fix(
+    "js/plugins/image.min.js",
+    'image.min.js: run re-mark hook after paste cleanup',
+    re.compile(
+        r'S\.events\.on\("paste\.before",ve\),'
+        r'S\.events\.on\("paste\.beforeCleanup",be\),'
+        r'S\.events\.on\("paste\.after",me\)'
+    ),
+    lambda m: (
+        'S.events.on("paste.before",ve),'
+        'S.events.on("paste.beforeCleanup",be),'
+        'S.events.on("paste.afterCleanup",pe),'
+        'S.events.on("paste.after",me)'
+    ),
+    lambda c: 'S.events.on("paste.afterCleanup",pe)' in c
 )
 
 
