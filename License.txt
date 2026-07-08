@@ -23,3 +23,13 @@ filerobot-image-editor (MIT)
 Version: 4.8.1
 Site: https://github.com/scaleflex/filerobot-image-editor#readme
 License: https://github.com/scaleflex/filerobot-image-editor?tab=MIT-1-ov-file
+
+yjs (MIT)
+Version: 13.6.30
+Site: https://github.com/yjs/yjs
+License: https://github.com/yjs/yjs?tab=License-1-ov-file
+ 
+y-websocket (MIT)
+Version:  3.0.0
+Site: https://github.com/yjs/y-websocket
+License: https://github.com/yjs/y-websocket?tab=MIT-1-ov-file
