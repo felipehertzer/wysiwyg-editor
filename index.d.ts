@@ -91,6 +91,7 @@ declare module "froala-editor" {
     shortcuts: Shortcuts;
     codeSnippet: CodeSnippet;
     aiAssist: AiAssist;
+    collaborative: Collaborative;
     static DefineIcon: (name: string, parameters: Partial<DefineIconParameters>) => object;
     static RegisterCommand: (name: string, parameters: Partial<RegisterCommandParameters>) => void;
     static RegisterShortcut: (keyCode: number,
@@ -1239,6 +1240,8 @@ declare module "froala-editor" {
     fontSizeDefaultSelection: string;
     fontSizeSelection: boolean;
     fontSizeUnit: string;
+    fontSizeCustomMin: number;
+    fontSizeCustomMax: number;
 
     // Form
     formEditButtons: string[];
@@ -1517,6 +1520,7 @@ declare module "froala-editor" {
     anchorEditButtons: string[];
 
     // import from word
+    importFromWordMammoth: any;
     importFromWordMaxFileSize: number;
     importFromWordFileTypesAllowed: string[];
     importFromWordUrlToUpload: string;
@@ -1541,6 +1545,9 @@ declare module "froala-editor" {
     // Filerobot
     filerobotOptions: FilerobotOptions;
     FilerobotImageEditor: any;
+
+    // Collaborative
+    collabConfig: Partial<CollabConfig>;
   }
 
   export interface FroalaEvents {
@@ -1707,6 +1714,20 @@ declare module "froala-editor" {
     'filerobot.closed': (this: FroalaEditor) => void;
     'filerobot.beforeSave': (this: FroalaEditor, editedImageObject: FilerobotImageObject) => boolean;
     'filerobot.saved': (this: FroalaEditor, editedImageObject: FilerobotImageObject) => void;
+
+    // Collaborative events
+    'collab.modeChanged': (this: FroalaEditor, newMode: string, prevMode: string) => void;
+    'collab.connectionStatus': (this: FroalaEditor, status: 'connecting' | 'connected' | 'disconnected') => void;
+    'collab.synced': (this: FroalaEditor) => void;
+    'collab.remoteContentChanged': (this: FroalaEditor) => void;
+    'version:create': (this: FroalaEditor, record: CollabVersionRecord) => void;
+    'version:autosave': (this: FroalaEditor, record: CollabVersionRecord) => void;
+    'version:restore': (this: FroalaEditor, record: CollabVersionRecord) => void;
+    'version:delete': (this: FroalaEditor, record: CollabVersionRecord) => void;
+    'version:rename': (this: FroalaEditor, record: CollabVersionRecord) => void;
+    'version:compareEnter': (this: FroalaEditor, selectedId: string, targetId: string) => void;
+    'version:compareExit': (this: FroalaEditor) => void;
+    'version:listUpdated': (this: FroalaEditor, list: CollabVersionRecord[]) => void;
   }
 
   export interface FilesManager {
@@ -2063,6 +2084,7 @@ declare module "froala-editor" {
     apply(value: string): object | void;
     refreshOnShow($btn: any, $dropdown: any): void;
     refresh($btn: any): void;
+    showCustomPopup($btn: any): void;
     [key: string]: (...args: any[]) => any;
   }
 
@@ -2624,6 +2646,81 @@ declare module "froala-editor" {
   type AiAssistOption = {
     title: string;
     prompt: string;
+  }
+
+  export interface CollabVersionRecord {
+    id: string;
+    title: string | null;
+    description?: string | null;
+    content: string;
+    authorId: string;
+    authorName: string;
+    timestamp: number;
+  }
+
+  export interface CollabConfig {
+    user: {
+      /** Unique user identifier. Auto-generated if null. */
+      id: string | null;
+      /** Display name shown in presence bar and comment/suggestion cards. */
+      name: string;
+      /** Starting role: 'editor' | 'suggester' | 'viewer'. */
+      role: 'editor' | 'suggester' | 'viewer';
+    };
+    /** docId/document identifier shared by all collaborators. Used as the Yjs room name. */
+    docId: string;
+    /** Users available for @mention inside comments. */
+    mentionableUsers: Array<{ id: string; name: string }>;
+    /** Base collection URL for comments (GET list / POST create). PATCH and DELETE use `<commentsUrl>/<id>`. */
+    commentsUrl: string | null;
+    /** Base collection URL for suggestions (GET list / POST create). PATCH and DELETE use `<suggestionsUrl>/<id>`. */
+    suggestionsUrl: string | null;
+    /** Real-time WebSocket configuration. Omit `syncUrl` or set it to null for async mode. */
+    realTime: {
+      /** WebSocket server URL. When null the plugin falls back to async (offline-first) mode. */
+      syncUrl: string | null;
+      /** Milliseconds before reconnect attempt after a disconnect. Default: 2000. */
+      reconnectDelay: number;
+    };
+    /** Version control (snapshot) configuration. */
+    versionControl: {
+      /** When true, automatically saves a snapshot on the configured interval. */
+      autoSaveEnabled: boolean;
+      /** Milliseconds between auto-save snapshots. Default: 60000. */
+      autoSaveInterval: number;
+      /** Base collection URL for versions (GET list / POST create). PATCH and DELETE use `<url>/<id>`. */
+      url: string | null;
+    };
+  }
+
+  export interface Collaborative {
+    _init(): void;
+    /** Switch collaboration mode: 'editing' | 'suggesting' | 'viewing'. */
+    setMode(mode: 'editing' | 'suggesting' | 'viewing'): void;
+    /** Return the currently active collaboration mode. */
+    getMode(): 'editing' | 'suggesting' | 'viewing';
+    /** Anchor a new comment to the current editor selection. */
+    addComment(text: string): void;
+    /** Expand (true) or collapse (false) the suggestions/comments side panel. Omit to toggle. */
+    updatePanelState(expand?: boolean): void;
+    /** Toggle the side panel between Open and Resolved views. */
+    switchPanelType(): void;
+    /** Re-fetch comments and suggestions from the backend and write them into the Yjs maps. */
+    syncCollabData(): Promise<void>;
+    /** Create a named version snapshot. */
+    saveVersion(title: string | null, description?: string | null): Promise<CollabVersionRecord>;
+    /** Return a snapshot copy of the in-memory version list, newest first. */
+    listVersions(): CollabVersionRecord[];
+    /** Replace editor content with the specified version snapshot. */
+    restoreVersion(id: string): Promise<void>;
+    /** Permanently delete the specified version snapshot. */
+    deleteVersion(id: string): Promise<void>;
+    /** Update the display title of a version snapshot. */
+    renameVersion(id: string, title: string): Promise<void>;
+    /** Reset the auto-save countdown timer. */
+    autoSaveReset(): void;
+    /** Force-refresh the version list from the backend. */
+    checkForUpdates(): Promise<CollabVersionRecord[]>;
   }
 
 }
