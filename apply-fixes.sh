@@ -8,6 +8,7 @@
 #   3. dark.css          — Remove unscoped .fr-clearfix / .fr-hide-by-clipping rules
 #   4. dark.min.css      — Same as above (minified version)
 #   5. image.min.js      — Re-mark pasted images after cleanup so uploads always run
+#   6. image.min.js      — Avoid S3 key collisions during simultaneous image uploads
 #
 # Usage:
 #   ./apply-fixes.sh
@@ -172,6 +173,28 @@ apply_fix(
         'S.events.on("paste.after",me)'
     ),
     lambda c: 'S.events.on("paste.afterCleanup",pe)' in c
+)
+
+
+# ── Fix 6: image.min.js — collision-resistant S3 object keys ─────────────────
+#
+# Froala's S3 uploader used Date.getTime() alone for pasted Blob filenames and
+# S3 keys. Multi-image Word paste can enqueue several uploads in the same
+# millisecond, causing every image to POST to the same object key and resolve to
+# the same CDN URL. Add a random segment to the key so simultaneous uploads do
+# not overwrite each other.
+
+apply_fix(
+    "js/plugins/image.min.js",
+    'image.min.js: avoid S3 key collisions for simultaneous uploads',
+    re.compile(
+        r'i\.append\("key",S\.opts\.imageUploadToS3\.keyStart\+\(new Date\)\.getTime\(\)\+"-"\+\(e\.name\|\|"untitled"\)\)'
+    ),
+    lambda m: (
+        'i.append("key",S.opts.imageUploadToS3.keyStart+(new Date).getTime()+"-"'
+        '+Math.random().toString(36).slice(2)+"-"+(e.name||"untitled"))'
+    ),
+    lambda c: 'Math.random().toString(36).slice(2)+"-"+(e.name||"untitled")' in c
 )
 
 
