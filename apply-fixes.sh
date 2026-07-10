@@ -9,6 +9,7 @@
 #   4. dark.min.css      — Same as above (minified version)
 #   5. image.min.js      — Re-mark pasted images after cleanup so uploads always run
 #   6. image.min.js      — Avoid S3 key collisions during simultaneous image uploads
+#   7. S3 image bundles  — Honor an exact server-signed S3 key when supplied
 #
 # Usage:
 #   ./apply-fixes.sh
@@ -74,6 +75,38 @@ apply_fix(
     ),
     lambda c: 'hasAttribute("width")' in c
 )
+
+
+# ── Fix 7: image bundles — honor an exact server-signed S3 key ───────────────
+#
+# Froala normally derives the object key from keyStart. Exact-key POST policies
+# instead sign one server-generated key, so appending timestamps or filenames
+# makes the browser request fail policy validation. Prefer an explicit `key`
+# while preserving the collision-resistant keyStart behavior as a fallback.
+
+exact_s3_key_pattern = re.compile(
+    r'(\w)\.append\("key",(\w)\.opts\.imageUploadToS3\.keyStart'
+    r'\+\(new Date\)\.getTime\(\)\+"-"\+'
+    r'(?:Math\.random\(\)\.toString\(36\)\.slice\(2\)\+"-"\+)?'
+    r'\((\w)\.name\|\|"untitled"\)\)'
+)
+
+for image_bundle in (
+    "js/plugins/image.min.js",
+    "js/plugins.pkgd.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        image_bundle,
+        f'{image_bundle}: honor an exact server-signed S3 key',
+        exact_s3_key_pattern,
+        lambda m: (
+            f'{m[1]}.append("key",{m[2]}.opts.imageUploadToS3.key||'
+            f'{m[2]}.opts.imageUploadToS3.keyStart+(new Date).getTime()+"-"'
+            f'+Math.random().toString(36).slice(2)+"-"+({m[3]}.name||"untitled"))'
+        ),
+        lambda c: '.opts.imageUploadToS3.key||' in c
+    )
 
 
 # ── Fix 2: word_paste.min.js — preserve data-fr-image-pasted ───────────────
