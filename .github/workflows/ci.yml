@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer:v2
+      - name: Validate package manifests
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            for (const file of ["package.json", "bower.json", "composer.json"]) {
+              JSON.parse(fs.readFileSync(file, "utf8"));
+            }
+          '
+          composer validate --strict --no-check-publish
+      - name: Validate JavaScript syntax
+        run: |
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find js -type f -name '*.js' -print0)
+      - name: Validate PHP examples
+        run: |
+          while IFS= read -r -d '' file; do
+            php --syntax-check "$file"
+          done < <(find html -type f -name '*.php' -print0)
+      - name: Verify custom patches remain applied
+        run: |
+          ./apply-fixes.sh
+          git diff --exit-code
