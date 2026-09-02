@@ -174,38 +174,39 @@ apply_fix(
     "js/plugins/image.min.js",
     'image.min.js: re-mark pasted images after cleanup',
     re.compile(
-        r'(function be\(e\)\{e=e\.replace\(/<img /gi,\'<img data-fr-image-pasted="true" \'\);'
-        r'var t=S\.doc\.createElement\("div"\);return t\.innerHTML=e,d=0<t\.textContent\.trim\(\)\.length,e\})'
-        r'(function \w+\(e\)\{)'
+        r'(function [A-Za-z_$][\w$]*\(e\)\{e=e\.replace\(/<img /gi,\'<img data-fr-image-pasted="true" \'\);'
+        r'var t=([A-Za-z_$][\w$]*)\.doc\.createElement\("div"\);'
+        r'return t\.innerHTML=e,[A-Za-z_$][\w$]*=0<t\.textContent\.trim\(\)\.length,e\})'
+        r'(function [A-Za-z_$][\w$]*\(e\)\{)'
     ),
     lambda m: (
         m[1]
-        + 'function pe(e){var t=S.doc.createElement("div");t.innerHTML=e;'
+        + f'function frReMarkPastedImages(e){{var t={m[2]}.doc.createElement("div");t.innerHTML=e;'
         + 'for(var a=t.querySelectorAll("img"),i=0;i<a.length;i++){'
         + 'var n=a[i].getAttribute("src")||"";'
         + '(0===n.indexOf("data:")||0===n.indexOf("blob:")||0===n.indexOf("http"))'
         + '&&a[i].setAttribute("data-fr-image-pasted","true")}'
         + 'return t.innerHTML}'
-        + m[2]
+        + m[3]
     ),
-    lambda c: 'function pe(e){var t=S.doc.createElement("div");t.innerHTML=e;' in c
+    lambda c: 'function frReMarkPastedImages(e){' in c
 )
 
 apply_fix(
     "js/plugins/image.min.js",
     'image.min.js: run re-mark hook after paste cleanup',
     re.compile(
-        r'S\.events\.on\("paste\.before",ve\),'
-        r'S\.events\.on\("paste\.beforeCleanup",be\),'
-        r'S\.events\.on\("paste\.after",me\)'
+        r'([A-Za-z_$][\w$]*)\.events\.on\("paste\.before",([A-Za-z_$][\w$]*)\),'
+        r'\1\.events\.on\("paste\.beforeCleanup",([A-Za-z_$][\w$]*)\),'
+        r'\1\.events\.on\("paste\.after",([A-Za-z_$][\w$]*)\)'
     ),
     lambda m: (
-        'S.events.on("paste.before",ve),'
-        'S.events.on("paste.beforeCleanup",be),'
-        'S.events.on("paste.afterCleanup",pe),'
-        'S.events.on("paste.after",me)'
+        f'{m[1]}.events.on("paste.before",{m[2]}),'
+        f'{m[1]}.events.on("paste.beforeCleanup",{m[3]}),'
+        f'{m[1]}.events.on("paste.afterCleanup",frReMarkPastedImages),'
+        f'{m[1]}.events.on("paste.after",{m[4]})'
     ),
-    lambda c: 'S.events.on("paste.afterCleanup",pe)' in c
+    lambda c: '.events.on("paste.afterCleanup",frReMarkPastedImages)' in c
 )
 
 
