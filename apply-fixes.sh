@@ -10,6 +10,8 @@
 #   5. image.min.js      — Re-mark pasted images after cleanup so uploads always run
 #   6. image.min.js      — Avoid S3 key collisions during simultaneous image uploads
 #   7. S3 image bundles  — Honor an exact server-signed S3 key when supplied
+#   8. core bundles      — Format a text selection inside one selected table cell
+#                          instead of overwriting it
 #
 # Usage:
 #   ./apply-fixes.sh
@@ -230,6 +232,47 @@ apply_fix(
     ),
     lambda c: 'Math.random().toString(36).slice(2)+"-"+(e.name||"untitled")' in c
 )
+
+
+# ── Fix 8: core bundles — keep the text when formatting inside one table cell ─
+#
+# A click in a table cell marks it .fr-selected-cell (for the table popup), and
+# the mark can outlive a drag that then selects text in that cell. With exactly
+# one selected cell, format.applyStyle/apply first insert a temporary marker
+# with html.insert, which replaces the selected text: changing the font, size,
+# colour or bold of copy in a template table emptied the cell. A text selection
+# means the user is formatting that text, so drop the cell mark and let the
+# normal text path format the selection.
+#
+# Upstream pattern (variable names change each release):
+#   V1=V2.table.selectedCells();if(!V3&&0<V1.length&&V4){
+#
+# Fixed pattern:
+#   V1=V2.table.selectedCells();if(!V3&&1===V1.length&&!V2.selection.isCollapsed()
+#     &&(V2.$el.find(".fr-selected-cell").removeClass("fr-selected-cell"),
+#        V1=V2.table.selectedCells()),!V3&&0<V1.length&&V4){
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f'{core_bundle}: keep the selected text when formatting inside one selected table cell',
+        re.compile(r'(\w)=(\w)\.table\.selectedCells\(\);if\(!(\w)&&0<\1\.length&&(\w)\)\{'),
+        lambda m: (
+            f'{m[1]}={m[2]}.table.selectedCells();'
+            f'if(!{m[3]}&&1==={m[1]}.length&&!{m[2]}.selection.isCollapsed()'
+            f'&&({m[2]}.$el.find(".fr-selected-cell").removeClass("fr-selected-cell"),'
+            f'{m[1]}={m[2]}.table.selectedCells()),'
+            f'!{m[3]}&&0<{m[1]}.length&&{m[4]}){{'
+        ),
+        lambda c: re.search(
+            r'if\(!\w&&1===\w\.length&&!\w\.selection\.isCollapsed\(\)'
+            r'&&\(\w\.\$el\.find\("\.fr-selected-cell"\)\.removeClass\("fr-selected-cell"\),',
+            c,
+        ) is not None
+    )
 
 
 # ── Print results ──────────────────────────────────────────────────────────
