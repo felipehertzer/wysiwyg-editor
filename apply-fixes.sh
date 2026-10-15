@@ -66,6 +66,9 @@
 #  41. AI bundles        — The AI popup is moved up when the answer makes it tall
 #                          (editors low on a page or in a dialog kept Insert below
 #                          the window)
+#  42. find_and_replace bundles — Find and Replace opens inside the editor, at its
+#                          right edge (it took the window's x for the toolbar's,
+#                          so it ran past an editor that isn't at the page's left)
 #
 # Usage:
 #   ./apply-fixes.sh
@@ -1623,6 +1626,56 @@ for ai_bundle in (
         lambda m: f'{m[1]}{m[4]}<{m[5]}&&0<{m[2]}&&',
         lambda c: re.search(
             r'"aiAssist\.promptPopup",null,[\w$]+\):[\w$]+\.isVisible\(\)&&[\w$]+<[\w$]+&&0<[\w$]+&&', c
+        ) is not None
+    )
+
+
+# ── Fix 42: find_and_replace bundles — the popup opens inside the editor ────
+#
+# The popup goes in the toolbar (absolute), but its left was the editor box's
+# right edge in window coordinates minus 500, so an editor away from the page's
+# left (a dialog, a column) had it pushed right by that much, past the editor and
+# cut off by the dialog. It was also placed before it is shown, while it has no
+# width. It is now placed once shown: right-aligned in the editor box (never left
+# of the box or the window), in its container's coordinates, 46px down as before.
+#
+# Upstream pattern (variable names change each release):
+#   n=(t.style.position="absolute",o=n.right-500,l=46,t.offsetWidth),a=t.offsetHeight,
+#   n=(0<=o&&…?(t.style.left=…o…):(t.style.left=…window.innerWidth/2…),s.selection.text().trim()),
+#   a=(s.popups.show("findReplace.popup"),
+#
+# Fixed pattern:
+#   n=(t.style.position="absolute",s.selection.text().trim()),
+#   a=(s.popups.show("findReplace.popup"),o=s.$box[0].getBoundingClientRect(),
+#   l=t.parentNode.getBoundingClientRect(),t.style.left=Math.max(Math.max(o.left,0),o.right-t.offsetWidth)-l.left+"px",
+#   t.style.top="46px",
+
+for find_bundle in (
+    "js/plugins/find_and_replace.min.js",
+    "js/plugins.pkgd.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        find_bundle,
+        f'{find_bundle}: Find and Replace opens inside the editor',
+        re.compile(
+            r'(?P<n>[\w$]+)=\((?P<t>[\w$]+)\.style\.position="absolute",(?P<o>[\w$]+)=(?P=n)\.right-500,'
+            r'(?P<l>[\w$]+)=46,(?P=t)\.offsetWidth\),(?P<a>[\w$]+)=(?P=t)\.offsetHeight,'
+            r'(?P=n)=\(0<=(?P=o)&&0<=(?P=l)&&(?P=o)\+(?P=n)<=window\.innerWidth&&(?P=l)\+(?P=a)<=window\.innerHeight'
+            r'\?\((?P=t)\.style\.left="".concat\((?P=o),"px"\),(?P=t)\.style\.top="".concat\((?P=l),"px"\)\)'
+            r':\((?P=t)\.style\.left="".concat\(window\.innerWidth/2-(?P=n)/2,"px"\),'
+            r'(?P=t)\.style\.top="".concat\(window\.innerHeight/20-(?P=a)/12,"px"\)\),'
+            r'(?P<s>[\w$]+)\.selection\.text\(\)\.trim\(\)\),(?P=a)=\((?P=s)\.popups\.show\("findReplace\.popup"\),'
+        ),
+        lambda m: (
+            f'{m["n"]}=({m["t"]}.style.position="absolute",{m["s"]}.selection.text().trim()),'
+            f'{m["a"]}=({m["s"]}.popups.show("findReplace.popup"),'
+            f'{m["o"]}={m["s"]}.$box[0].getBoundingClientRect(),{m["l"]}={m["t"]}.parentNode.getBoundingClientRect(),'
+            f'{m["t"]}.style.left="".concat(Math.max(Math.max({m["o"]}.left,0),{m["o"]}.right-{m["t"]}.offsetWidth)-{m["l"]}.left,"px"),'
+            f'{m["t"]}.style.top="46px",'
+        ),
+        lambda c: re.search(
+            r'\.popups\.show\("findReplace\.popup"\),[\w$]+=[\w$]+\.\$box\[0\]\.getBoundingClientRect\(\),', c
         ) is not None
     )
 
