@@ -69,6 +69,12 @@
 #  42. find_and_replace bundles — Find and Replace opens inside the editor, at its
 #                          right edge (it took the window's x for the toolbar's,
 #                          so it ran past an editor that isn't at the page's left)
+#  43. core bundles      — Style inlining leaves out the editing area's own rules
+#                          (.fr-element): saved images no longer get its 1px padding
+#  44. core bundles      — Style inlining keeps its record of each element's
+#                          properties per element, not one per kind of element
+#  45. image bundles     — imageOutputSize writes no height="auto" for an image
+#                          styled height: auto
 #
 # Usage:
 #   ./apply-fixes.sh
@@ -1677,6 +1683,138 @@ for find_bundle in (
         lambda c: re.search(
             r'\.popups\.show\("findReplace\.popup"\),[\w$]+=[\w$]+\.\$box\[0\]\.getBoundingClientRect\(\),', c
         ) is not None
+    )
+
+
+# ── Fix 43: core bundles — style inlining leaves the editing area's rules out ─
+#
+# With useClasses: false, html.get copies every page rule that matches the
+# content into the content's inline styles. Froala's CSS has two kinds of rule:
+# .fr-view rules are the content's own look (image alignment, table borders,
+# quotes) and are meant to be copied; .fr-element rules dress the editing area
+# (1px of padding each side of an image, the selected cell's highlight,
+# user-select). Those were copied too: `.fr-element img {padding: 0 1px}` (the
+# image plugin's CSS and every theme) went into every image of every saved
+# email, so a full-width image ran 2px past its column and a phone scrolled the
+# email sideways. Leave out the parts of a selector list that name
+# .fr-element, and score the specificity on what is left.
+#
+# Upstream pattern (variable names change each release; the scorer is Fix 16's):
+#   var C=p[h].selectorText.replace(/body \s tbody \.fr-view /g,"").replace(/::/g,":"),m=void 0;
+#   try{m=w.el.querySelectorAll(C)}catch(O){m=[]}…return s}(p[h].selectorText,
+#
+# Fixed pattern:
+#   var frContentSelector=p[h].selectorText.split(/,(?![^(]*\))/).filter(function(q){
+#     return!/\.fr-element(?![\w-])/.test(q)}).join(","),C=frContentSelector.replace(…).replace(…),m=void 0;
+#   try{m=C?w.el.querySelectorAll(C):[]}catch(O){m=[]}…return s}(frContentSelector,
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f"{core_bundle}: style inlining leaves the editing area's rules out",
+        re.compile(
+            r'var ([\w$]+)=([\w$]+)\[([\w$]+)\]\.selectorText\.replace\(/body \\s tbody \\\.fr-view /g,""\)'
+            r'\.replace\(/::/g,":"\),([\w$]+)=void 0;try\{\4=([\w$]+)\.el\.querySelectorAll\(\1\)\}'
+            r'catch\(([\w$]+)\)\{\4=\[\]\}(.*?)return s\}\(\2\[\3\]\.selectorText,',
+            re.S
+        ),
+        lambda m: (
+            f'var frContentSelector={m[2]}[{m[3]}].selectorText.split(/,(?![^(]*\\))/)'
+            r'.filter(function(q){return!/\.fr-element(?![\w-])/.test(q)}).join(","),'
+            f'{m[1]}=frContentSelector.replace(/body \\s tbody \\.fr-view /g,"").replace(/::/g,":"),'
+            f'{m[4]}=void 0;try{{{m[4]}={m[1]}?{m[5]}.el.querySelectorAll({m[1]}):[]}}catch({m[6]}){{{m[4]}=[]}}'
+            f'{m[7]}return s}}(frContentSelector,'
+        ),
+        lambda c: 'var frContentSelector=' in c
+    )
+
+
+# ── Fix 44: core bundles — style inlining keeps a record per element ─────────
+#
+# html.get records, for each element and property, the specificity of the rule
+# that set it, or 1e4 for a property in the element's own style, so that a less
+# specific rule doesn't override it. The record was a plain object keyed by the
+# element, and an object key is a string: every cell was the same key
+# ("[object HTMLTableCellElement]"), every image another, every link its href.
+# Once a cell with a border in its own style was read, "border" counted as
+# every cell's own, and a later cell with any style of its own (an alignment,
+# a width) was left without the table's grid; an image with a width of its own
+# lost max-width:100% the same way. Key the record by the element (a Map).
+#
+# Upstream pattern (variable names change each release):
+#   html.beforeGet"),[]),l={},c=[];…l[m[M]]||(l[m[M]]={});…l[m[M]][y]…for(c.sort(
+#
+# Fixed pattern:
+#   html.beforeGet"),[]),l=new Map,c=[];…l.has(m[M])||l.set(m[M],{});…l.get(m[M])[y]…for(c.sort(
+
+def record_per_element(m):
+    record = m['record']
+    body = re.sub(
+        rf'(?<![\w$.]){re.escape(record)}\[([\w$]+\[[\w$]+\])\]\|\|\({re.escape(record)}\[\1\]=\{{\}}\)',
+        lambda n: f'{record}.has({n[1]})||{record}.set({n[1]},{{}})',
+        m['body'],
+    )
+    body = re.sub(
+        rf'(?<![\w$.]){re.escape(record)}\[([\w$]+\[[\w$]+\])\]',
+        lambda n: f'{record}.get({n[1]})',
+        body,
+    )
+    return f'{m["head"]}{record}=new Map,{body}{m["tail"]}'
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f'{core_bundle}: style inlining keeps a record per element',
+        re.compile(
+            r'(?P<head>\.trigger\("html\.beforeGet"\),\[\]\),)(?P<record>[\w$]+)=\{\},'
+            r'(?P<body>.*?)(?P<tail>for\([\w$]+\.sort\()',
+            re.S
+        ),
+        record_per_element,
+        lambda c: re.search(r'\.trigger\("html\.beforeGet"\),\[\]\),[\w$]+=new Map,', c) is not None
+    )
+
+
+# ── Fix 45: image bundles — imageOutputSize writes no height="auto" ──────────
+#
+# imageOutputSize gives an image its missing width/height attributes (what
+# Outlook sizes it by) from its CSS size, or else from its size on screen. The
+# usual fluid email image is styled `height: auto` with a width attribute only
+# (a press release's), and got height="auto", which is no valid attribute
+# value. Take the height from a CSS height in pixels, or from the screen when
+# there is no CSS height; a keyword like auto writes none, which is what it
+# means. (Measuring it on screen instead would freeze a fluid image's height
+# at its size in the composer, out of proportion on a phone.)
+#
+# Upstream pattern (variable names change each release; Fix 1 guards it in
+# image.min.js):
+#   n=i[e].style.height||C(i[e]).height()
+#
+# Fixed pattern:
+#   n=(/^\d+(\.\d+)?(px)?$/.test(i[e].style.height)?i[e].style.height:!i[e].style.height&&C(i[e]).height())
+
+for image_bundle in (
+    "js/plugins/image.min.js",
+    "js/plugins.pkgd.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        image_bundle,
+        f'{image_bundle}: imageOutputSize writes no height="auto"',
+        re.compile(r'([\w$]+)\[([\w$]+)\]\.style\.height\|\|([\w$]+)\(\1\[\2\]\)\.height\(\)'),
+        lambda m: (
+            r'(/^\d+(\.\d+)?(px)?$/.test('
+            f'{m[1]}[{m[2]}].style.height)?{m[1]}[{m[2]}].style.height'
+            f':!{m[1]}[{m[2]}].style.height&&{m[3]}({m[1]}[{m[2]}]).height())'
+        ),
+        lambda c: re.search(r'\(px\)\?\$/\.test\([\w$]+\[[\w$]+\]\.style\.height\)', c) is not None,
+        count=0,
     )
 
 
