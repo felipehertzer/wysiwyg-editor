@@ -75,6 +75,21 @@
 #                          properties per element, not one per kind of element
 #  45. image bundles     — imageOutputSize writes no height="auto" for an image
 #                          styled height: auto
+#  46. core bundles      — Two lists side by side that look the same are joined
+#                          (a pasted list's data-pasted, list-style-type or
+#                          top/bottom margins kept them apart)
+#  47. core bundles      — A cell selected by a click formats the text the caret
+#                          or selection is in, not the whole cell (or nothing)
+#  48. lists bundles     — A list command leaves a non-editable wrapper of blocks
+#                          (<signature>) alone
+#  49. core bundles      — html.wrap puts the selection back only where its
+#                          offsets fit (no IndexSizeError on a selection that
+#                          ends in another node)
+#  50. core bundles      — html.wrap (ENTER_BR) splits an inline wrapper that
+#                          spans lines at its <br>s, so a block command works on
+#                          the line it is given
+#  51. core bundles      — paste.clean called by a plugin takes its own undo
+#                          snapshot (a null step broke undo on the next paste)
 #
 # Usage:
 #   ./apply-fixes.sh
@@ -330,7 +345,8 @@ for core_bundle in (
             f'{m[1]}={m[2]}.table.selectedCells()),'
             f'!{m[3]}&&0<{m[1]}.length&&{m[4]}){{'
         ),
-        lambda c: re.search(
+        # Fix 47 widens this condition to a caret in the cell (frHeldCell).
+        lambda c: 'frHeldCell' in c or re.search(
             r'if\(!\w&&1===\w\.length&&!\w\.selection\.isCollapsed\(\)'
             r'&&\(\w\.\$el\.find\("\.fr-selected-cell"\)\.removeClass\("fr-selected-cell"\),',
             c,
@@ -1815,6 +1831,289 @@ for image_bundle in (
         ),
         lambda c: re.search(r'\(px\)\?\$/\.test\([\w$]+\[[\w$]+\]\.style\.height\)', c) is not None,
         count=0,
+    )
+
+
+# ── Fix 46: core bundles — lists that look the same are joined ──────────────
+#
+# clean.lists joins a list to the list just before it only when their opening
+# tags are identical, attribute for attribute, so lists that look the same
+# stayed apart, a gap between them:
+# - Froala marks the first element of a paste with data-pasted="true" and
+#   never takes it off. Word for the web writes one <ul> per item, and its
+#   paste came out as a list of one item and a list of the rest.
+# - A pasted list keeps styles the bullet button's plain <ul> has not: Word for
+#   the web's list-style-type: disc, Google Docs' margin-top:0;margin-bottom:0.
+#   A pasted item taken out with Backspace and bulleted again became a list of
+#   its own.
+# Join two lists that show the same thing: the same tag, direction, start,
+# type and class, and the same marker and indent as the browser draws them
+# (list-style, margins and padding on the sides). Space above and below, and
+# data- attributes, don't keep them apart. A list with another marker or
+# indent stays apart.
+#
+# Upstream pattern (variable names change each release):
+#   if(w.node.isList(n.previousSibling)&&w.node.openTagString(n)===w.node.openTagString(n.previousSibling))
+#
+# Fixed pattern:
+#   if(w.node.isList(n.previousSibling)&&function(frSameList){return frSameList(n)===frSameList(n.previousSibling)}(
+#     function(q){…tag, dir, start, type, reversed, class + computed list-style and side margins/padding…}))
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f'{core_bundle}: lists that look the same are joined',
+        re.compile(
+            r'if\(([\w$]+)\.node\.isList\(([\w$]+)\.previousSibling\)&&\1\.node\.openTagString\(\2\)'
+            r'===\1\.node\.openTagString\(\2\.previousSibling\)\)'
+        ),
+        lambda m: (
+            f'if({m[1]}.node.isList({m[2]}.previousSibling)&&function(frSameList){{'
+            f'return frSameList({m[2]})===frSameList({m[2]}.previousSibling)}}(function(q){{'
+            'var g={};try{g=(q.ownerDocument.defaultView||window).getComputedStyle(q)}catch(frError){}'
+            'return[q.tagName,q.getAttribute("dir"),q.getAttribute("start"),q.getAttribute("type"),'
+            'q.hasAttribute("reversed"),q.getAttribute("class"),g.listStyleType,g.listStyleImage,'
+            'g.listStylePosition,g.marginLeft,g.marginRight,g.paddingLeft,g.paddingRight,g.direction].join("|")}))'
+        ),
+        lambda c: 'frSameList' in c,
+    )
+
+
+# ── Fix 47: core bundles — a clicked cell formats the text the caret is in ───
+#
+# A click in a table cell marks the cell selected (.fr-selected-cell), and with
+# one selected cell the format module formats the whole cell: Bold with the
+# caret on one line of a cell made every line bold, and a bullet list took the
+# whole cell. Fix 8 let an inline format through when text is selected in the
+# cell, but a list (or any block command: paragraph format, indent, quote)
+# with text selected in the cell did nothing at all: the cell was let go, and
+# the command was still cancelled. A cell that only holds the caret or the
+# selection was selected by the click that put them there, not chosen as a
+# cell: let it go and run the command on the text, as in any other block. A
+# selection across cells keeps formatting whole cells.
+#
+# Upstream pattern (variable names change each release; Fix 8's condition):
+#   if(!L&&1===r.length&&!M.selection.isCollapsed()&&(M.$el.find(".fr-selected-cell").removeClass(…),r=M.table.selectedCells())
+#   …commands.before",function(e,t){var n=M.table&&0<M.table.selectedCells().length;
+#     if(!L&&n&&["formatOLSimple",…,"clearFormatting"].includes(e))return M.undo.saveStep(),
+#
+# Fixed pattern:
+#   if(!L&&1===r.length&&function(frHeldCell){…the selection starts and ends in it…}(r[0])&&(…)
+#   …["formatOLSimple",…,"clearFormatting"].includes(e)&&(function frLetHeldCellGo(){…let a cell that holds the
+#     selection go…}(),0<M.table.selectedCells().length))return M.undo.saveStep(),
+
+held_cell = (
+    'function(frHeldCell){{var frS={M}.selection.get(),frR=frS&&frS.rangeCount&&frS.getRangeAt(0);'
+    'return!!frR&&frHeldCell.contains(frR.startContainer)&&frHeldCell.contains(frR.endContainer)}}'
+)
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f'{core_bundle}: a clicked cell formats the text the caret is in (formats)',
+        re.compile(
+            r'if\(!([\w$]+)&&1===([\w$]+)\.length&&!([\w$]+)\.selection\.isCollapsed\(\)'
+            r'&&\(\3\.\$el\.find\("\.fr-selected-cell"\)\.removeClass\("fr-selected-cell"\)'
+        ),
+        lambda m: (
+            f'if(!{m[1]}&&1==={m[2]}.length&&' + held_cell.format(M=m[3]) + f'({m[2]}[0])'
+            f'&&({m[3]}.$el.find(".fr-selected-cell").removeClass("fr-selected-cell")'
+        ),
+        lambda c: 'frHeldCell' in c and 'frLetHeldCellGo' in c,
+    )
+    # Only the block commands it takes over let the cell go: the table popup's own commands (rows, columns, cell
+    # background, alignment) work on the marked cell.
+    apply_fix(
+        core_bundle,
+        f'{core_bundle}: a clicked cell formats the text the caret is in (block commands)',
+        re.compile(
+            r'(\["formatOLSimple","formatOL","formatUL","paragraphFormat","paragraphStyle","outdent","indent","quote",'
+            r'"clearFormatting"\]\.includes\(([\w$]+)\))\)return ([\w$]+)\.undo\.saveStep\(\),'
+        ),
+        lambda m: (
+            f'{m[1]}&&(function frLetHeldCellGo(){{'
+            f'var frC={m[3]}.table.selectedCells();1===frC.length&&' + held_cell.format(M=m[3]) + '(frC[0])'
+            f'&&{m[3]}.$el.find(".fr-selected-cell").removeClass("fr-selected-cell")}}(),'
+            f'0<{m[3]}.table.selectedCells().length))return {m[3]}.undo.saveStep(),'
+        ),
+        lambda c: 'frLetHeldCellGo' in c,
+    )
+
+
+# ── Fix 48: lists bundles — a list command leaves a non-editable wrapper alone ─
+#
+# The signature is a non-editable wrapper of paragraphs. Fixes 37 and 38 keep
+# formatting out of it; a list command still turned its paragraphs into list
+# items: Select All and the bullet button made the signature a bulleted list,
+# and a selection that ended in it took its first line. Leave out the blocks
+# inside a non-editable element of the editor, also when a list type is set.
+#
+# Upstream pattern (variable names change each release):
+#   r=r.filter(function(e){return!A(e).closest(".fr-code-snippet").length})
+#   …for(n=0;n<r.length;n++)"LI"==r[n].tagName&&(a=A(r[n].parentNode),t)&&a.css("list-style-type",
+#
+# Fixed pattern:
+#   r=r.filter(function(e){return!A(e).closest(".fr-code-snippet").length&&!frNonEditable(e)})
+#   …"LI"==r[n].tagName&&!frNonEditable(r[n])&&(a=A(r[n].parentNode),t)&&a.css("list-style-type",
+#   (frNonEditable: the block's nearest contenteditable="false" ancestor lies inside the editor)
+
+non_editable = (
+    'function frNonEditable(q){{return!!(q=q.parentNode&&q.parentNode.closest'
+    '&&q.parentNode.closest(\'[contenteditable="false"]\'))&&!!q.closest(".fr-element")}}'
+)
+
+for lists_bundle in (
+    "js/plugins/lists.min.js",
+    "js/plugins.pkgd.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        lists_bundle,
+        f'{lists_bundle}: a list command leaves a non-editable wrapper alone',
+        re.compile(
+            r'([\w$]+)=\1\.filter\(function\(([\w$]+)\)\{return!([\w$]+)\(\2\)\.closest\("\.fr-code-snippet"\)\.length\}\)'
+            r'(.*?)"LI"==([\w$]+)\[([\w$]+)\]\.tagName&&\(([\w$]+)=\3\(\5\[\6\]\.parentNode\),([\w$]+)\)'
+            r'&&\7\.css\("list-style-type"',
+            re.S
+        ),
+        lambda m: (
+            f'{m[1]}={m[1]}.filter(function({m[2]}){{return!{m[3]}({m[2]}).closest(".fr-code-snippet").length'
+            f'&&!(' + non_editable.format() + f')({m[2]})}})'
+            f'{m[4]}"LI"=={m[5]}[{m[6]}].tagName&&!(' + non_editable.format() + f')({m[5]}[{m[6]}])'
+            f'&&({m[7]}={m[3]}({m[5]}[{m[6]}].parentNode),{m[8]})&&{m[7]}.css("list-style-type"'
+        ),
+        lambda c: 'frNonEditable' in c,
+    )
+
+
+# ── Fix 49: core bundles — html.wrap puts the selection back where it fits ───
+#
+# html.wrap rebuilds a block's children, and when the selection's end node was
+# among them it put a range back on the end node's copy, from the START
+# offset to the end offset. That only fits a selection inside one node. A
+# selection from one line into another node (Shift+Down into the signature's
+# caret span, one character long) threw "IndexSizeError: Failed to execute
+# 'setStart' on 'Range': The offset 2 is larger than the node's length (1)",
+# and the list command stopped half done. Put the range back only when both
+# offsets fit the node; the commands that wrap keep their own markers.
+#
+# Upstream pattern (variable names change each release):
+#   s&&(e.innerHTML="",e.appendChild(o),u)&&(c=w.doc.createRange(),w.selection.get().removeAllRanges(),
+#     c.setStart(l,f),c.setEnd(l,p),w.selection.get().addRange(c))
+#
+# Fixed pattern:
+#   s&&(e.innerHTML="",e.appendChild(o),u&&function frRangeFits(q,a,b){…a and b <= q's length…}(l,f,p))&&(…)
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f'{core_bundle}: html.wrap puts the selection back where it fits',
+        re.compile(
+            r'([\w$]+)&&\(([\w$]+)\.innerHTML="",\2\.appendChild\(([\w$]+)\),([\w$]+)\)'
+            r'&&\(([\w$]+)=([\w$]+)\.doc\.createRange\(\),\6\.selection\.get\(\)\.removeAllRanges\(\),'
+            r'\5\.setStart\(([\w$]+),([\w$]+)\),\5\.setEnd\(\7,([\w$]+)\),\6\.selection\.get\(\)\.addRange\(\5\)\)'
+        ),
+        lambda m: (
+            f'{m[1]}&&({m[2]}.innerHTML="",{m[2]}.appendChild({m[3]}),{m[4]}&&function frRangeFits(q,a,b){{'
+            'if(!q)return!1;var z=q.nodeType===Node.TEXT_NODE?q.length:q.childNodes.length;return a<=z&&b<=z}'
+            f'({m[7]},{m[8]},{m[9]}))&&({m[5]}={m[6]}.doc.createRange(),{m[6]}.selection.get().removeAllRanges(),'
+            f'{m[5]}.setStart({m[7]},{m[8]}),{m[5]}.setEnd({m[7]},{m[9]}),{m[6]}.selection.get().addRange({m[5]}))'
+        ),
+        lambda c: 'frRangeFits' in c,
+    )
+
+
+# ── Fix 50: core bundles — html.wrap splits an inline wrapper at its lines ───
+#
+# With enter: ENTER_BR a line is the run of inline content between two <br>s,
+# and html.wrap gives each run a temporary block so block commands (lists,
+# alignment, paragraph format, indent) work on lines. Select All and a font,
+# size or colour wrapped every line in one <span> around the <br>s; that span
+# was one run, so the bullet button on one line made a single list item of
+# every line, and Align Center centred them all. Before wrapping, split an
+# inline element that holds <br>s (and no block) into one copy per line, the
+# <br>s between them, as the lines were before the style. A non-editable
+# element (a merge tag, the signature) is left whole.
+#
+# Upstream pattern (variable names change each release):
+#   function l(e,t){var n=m();if(n=t?"div":n){for(var o=w.doc.createDocumentFragment(),
+#
+# Fixed pattern:
+#   function l(e,t){var n=m();if(n=t?"div":n){(function frSplitLines(frEl){…})(e);for(var o=w.doc.createDocumentFragment(),
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f'{core_bundle}: html.wrap splits an inline wrapper at its lines',
+        re.compile(
+            r'function ([\w$]+)\(([\w$]+),([\w$]+)\)\{var ([\w$]+)=([\w$]+)\(\);if\(\4=\3\?"div":\4\)\{'
+            r'for\(var ([\w$]+)=([\w$]+)\.doc\.createDocumentFragment\(\)'
+        ),
+        lambda m: (
+            f'function {m[1]}({m[2]},{m[3]}){{var {m[4]}={m[5]}();if({m[4]}={m[3]}?"div":{m[4]}){{'
+            '(function frSplitLines(frEl){for(var frC=frEl.firstChild,frN;frC;frC=frN){frN=frC.nextSibling;'
+            f'if(frC.nodeType===Node.ELEMENT_NODE&&"BR"!==frC.tagName&&!{m[7]}.node.isBlock(frC)'
+            '&&"false"!==frC.contentEditable&&frC.querySelector("br")'
+            f'&&!frC.querySelector({m[7]}.html.blockTagsQuery())){{'
+            f'for(var frB;frB=frC.querySelector("br");){{var frR={m[7]}.doc.createRange(),frL=frC.cloneNode(!1);'
+            'frR.setStart(frC,0),frR.setEndBefore(frB),frL.appendChild(frR.extractContents()),frL.removeAttribute("id"),'
+            f'frL.firstChild&&frC.parentNode.insertBefore(frL,frC),frC.parentNode.insertBefore({m[7]}.doc.createElement("br"),frC),'
+            f'frB.parentNode.removeChild(frB)}}frC.firstChild||frC.parentNode.removeChild(frC)}}}}}})({m[2]});'
+            f'for(var {m[6]}={m[7]}.doc.createDocumentFragment()'
+        ),
+        lambda c: 'frSplitLines' in c,
+    )
+
+
+# ── Fix 51: core bundles — paste.clean takes its own undo snapshot ───────────
+#
+# paste.clean ends a paste by putting the snapshot taken when the paste began
+# back as the step before it (undo.saveStep(y)), then forgets it (y = null).
+# Only Froala's own paste handler takes that snapshot. A plugin that handles
+# the paste itself and calls paste.clean (PA's Google Docs "keep formatting?"
+# question) never had one: the first such paste saved a step from undefined
+# (harmless, a plain save), and the next one saved null, which undo.saveStep
+# writes into the stack. Undo then reached the null step and threw "Cannot read
+# properties of null (reading 'html')", and nothing older could be undone.
+# Take the snapshot at the start of paste.clean when none was taken, as the
+# paste handler does (saving any typing still waiting for its step first).
+#
+# Upstream pattern (variable names change each release):
+#   function m(e,t,n){var o=null,r=null,i=(0<=e.toLowerCase().indexOf("<body")…b.undo.saveStep(y),y=null,b.undo.saveStep()
+#
+# Fixed pattern:
+#   function m(e,t,n){y||(b.keys.forceUndo(),y=b.snapshot.get());var o=null,…   (frPasteSnapshot marks it)
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f'{core_bundle}: paste.clean takes its own undo snapshot',
+        re.compile(
+            r'(function [\w$]+\(([\w$]+),[\w$]+,[\w$]+\)\{)'
+            r'(var [\w$]+=null,[\w$]+=null,[\w$]+=\(0<=\2\.toLowerCase\(\)\.indexOf\("<body"\).*?)'
+            r'([\w$]+)\.undo\.saveStep\(([\w$]+)\),\5=null,\4\.undo\.saveStep\(\)',
+            re.S
+        ),
+        lambda m: (
+            f'{m[1]}var frPasteSnapshot={m[5]}||({m[4]}.keys.forceUndo(),{m[4]}.snapshot.get());{m[5]}=frPasteSnapshot;'
+            f'{m[3]}{m[4]}.undo.saveStep({m[5]}),{m[5]}=null,{m[4]}.undo.saveStep()'
+        ),
+        lambda c: 'frPasteSnapshot' in c,
     )
 
 
