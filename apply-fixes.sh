@@ -90,6 +90,17 @@
 #                          the line it is given
 #  51. core bundles      — paste.clean called by a plugin takes its own undo
 #                          snapshot (a null step broke undo on the next paste)
+#  52. image bundles     — An image taken out of the styled span it was pasted
+#                          in leaves no empty span behind (Word for the web's
+#                          sized, grey image box beside each logo)
+#  53. image bundles     — A copy with text or several pictures, and the
+#                          pictures as files, pastes all of it (only the first
+#                          file was pasted: the text and other pictures lost)
+#  54. core bundles      — An event aimed at a text node reaches Froala's
+#                          delegated handlers from its element (it threw
+#                          "TypeError: Illegal invocation")
+#  55. core bundles      — Backspace's keyup with no second selection marker
+#                          leaves the line alone (it threw reading 'nextSibling')
 #
 # Usage:
 #   ./apply-fixes.sh
@@ -2114,6 +2125,286 @@ for core_bundle in (
             f'{m[3]}{m[4]}.undo.saveStep({m[5]}),{m[5]}=null,{m[4]}.undo.saveStep()'
         ),
         lambda c: 'frPasteSnapshot' in c,
+    )
+
+
+# ── Fix 52: image bundles — an image taken out of its span leaves no box ─────
+#
+# The image plugin moves a pasted image out of the inline formatting around it
+# (a styled <span>, <b>, <i>), so the image isn't formatted text. Word for the
+# web puts each image in a span of its own size, display: inline-block, with a
+# grey background while it loads (WACImageContainer). The image came out and
+# the span stayed, empty but still 161 x 76 px and grey, beside every logo of
+# a pasted signature or release, in the editor and in the email. A wrapper the
+# image leaves with nothing in it (no element, no text but spaces) goes too.
+#
+# Upstream pattern (variable names change each release):
+#   …else t.parentNode.insertBefore(e,t);t=e.parentNode}else t=(e=t).parentNode}
+#
+# Fixed pattern:
+#   …else{var frWrap=t;t.parentNode.insertBefore(e,t),frWrap.firstElementChild
+#     ||frWrap.textContent.replace(/\u200B/g,"").trim()||frWrap.parentNode.removeChild(frWrap)}t=e.parentNode}…
+
+for image_bundle in (
+    "js/plugins/image.min.js",
+    "js/plugins.pkgd.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        image_bundle,
+        f'{image_bundle}: an image taken out of its span leaves no empty span',
+        re.compile(
+            r'else ([\w$]+)\.parentNode\.insertBefore\(([\w$]+),\1\);\1=\2\.parentNode\}'
+            r'else \1=\(\2=\1\)\.parentNode\}'
+        ),
+        lambda m: (
+            f'else{{var frWrap={m[1]};{m[1]}.parentNode.insertBefore({m[2]},{m[1]}),frWrap.firstElementChild'
+            r'||frWrap.textContent.replace(/\u200B/g,"").trim()||frWrap.parentNode.removeChild(frWrap)}'
+            f'{m[1]}={m[2]}.parentNode}}else {m[1]}=({m[2]}={m[1]}).parentNode}}'
+        ),
+        lambda c: 'frWrap' in c,
+    )
+
+
+# ── Fix 53: image bundles — a copy with text and picture files pastes whole ───
+#
+# A browser or mail client that copies pictures also puts each picture on the
+# clipboard as a file. The image plugin's paste handler took the first file
+# and pasted only that, in place of the copy: right for one picture copied on
+# its own (Fixes 17 and 39), but a copy with text in it (an Apple Mail or
+# Safari signature: name, title, logo) lost the text, and a copy of several
+# pictures kept only the first. When the copy holds text or more than one
+# picture, paste its HTML, each picture taken from the clipboard's files in
+# order when there is one file for each, as when the HTML can't show it
+# (webkit-fake-url) or links another site; otherwise leave the HTML to the
+# paste as it is (pictures it can't show become PA's placeholders).
+#
+# Upstream pattern (variable names change each release):
+#   …S.browser.mozilla&&(…)&&(t=S.paste.getCachedClipboardData("html"));e=(new DOMParser).parseFromString(t,"text/html").querySelector("img");
+#
+# Fixed pattern:
+#   …(t=S.paste.getCachedClipboardData("html"));var frCopy=…,frImages=frCopy.querySelectorAll("img");
+#     if(1<frImages.length||frImages.length&&frCopy.body.textContent…trim()){…read the files, set the
+#     sources, S.selection.restore(),S.paste.clean(frCopy.body.innerHTML)…;return!1}e=(new DOMParser)…
+
+def paste_whole_copy(m):
+    S, t, a = m['S'], m['t'], m['a']
+    return (
+        f'{m["head"]}var frCopy=(new DOMParser).parseFromString({t},"text/html"),frImages=frCopy.querySelectorAll("img");'
+        f'if(1<frImages.length||frImages.length&&(frCopy.body?frCopy.body.textContent:"").replace(/\\u200B/g,"").trim()){{'
+        f'for(var frFiles=[],frI=0;frI<{a}.items.length;frI++){{var frF="file"==={a}.items[frI].kind&&{a}.items[frI].getAsFile();'
+        'frF&&/^image\\//.test(frF.type)&&frFiles.push(frF)}'
+        'if(frFiles.length!==frImages.length)return!0;'
+        f'{S}.selection.save();'
+        'Promise.all(frFiles.map(function(frFile){return new Promise(function(frDone){var frReader=new FileReader;'
+        'frReader.onload=function(){frDone(frReader.result)},frReader.onerror=function(){frDone(null)},frReader.readAsDataURL(frFile)})}))'
+        '.then(function(frData){for(var frN=0;frN<frImages.length;frN++)frData[frN]&&frImages[frN].setAttribute("src",frData[frN]);'
+        f'{S}.selection.restore(),{S}.paste.clean(frCopy.body.innerHTML)}});return!1}}'
+        f'{m["tail"]}'
+    )
+
+for image_bundle in (
+    "js/plugins/image.min.js",
+    "js/plugins.pkgd.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        image_bundle,
+        f'{image_bundle}: a copy with text and picture files pastes whole',
+        re.compile(
+            r'(?P<head>var (?P<a>[\w$]+)=[\w$]+\|\|[\w$]+&&[\w$]+\.clipboardData;if\((?P=a)&&(?P=a)\.items\)\{.{0,400}?'
+            r'(?P<S>[\w$]+)\.browser\.mozilla&&\(""===(?P<t>[\w$]+)\|\|/<!--StartFragment-->\(\[ \]\)<!--EndFragment-->/\.test\((?P=t)\)\)'
+            r'&&\((?P=t)=(?P=S)\.paste\.getCachedClipboardData\("html"\)\);)'
+            r'(?P<tail>[\w$]+=\(new DOMParser\)\.parseFromString\((?P=t),"text/html"\)\.querySelector\("img"\);)',
+            re.S
+        ),
+        paste_whole_copy,
+        lambda c: 'frCopy' in c,
+        count=0,
+    )
+
+
+# The files manager plugin has the same handler, the <img> looked up first.
+
+def paste_whole_copy_files_manager(m):
+    return paste_whole_copy(m).replace('frCopy', 'frFmCopy')
+
+for files_bundle in (
+    "js/plugins/files_manager.min.js",
+    "js/plugins.pkgd.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        files_bundle,
+        f'{files_bundle}: a copy with text and picture files pastes whole (files manager)',
+        re.compile(
+            r'(?P<head>var (?P<a>[\w$]+)=[\w$]+\|\|[\w$]+&&[\w$]+\.clipboardData;if\((?P=a)&&(?P=a)\.items\)\{'
+            r'var (?P<t>[\w$]+)=\((?P=a)\|\|window\.clipboardData\)\.getData\("text/html"\)\|\|"",'
+            r'[\w$]+=\(new DOMParser\)\.parseFromString\((?P=t),"text/html"\)\.querySelector\("img"\),'
+            r"[\w$]+=/OneNote[^;]{0,200}?;if\((?P=t)\.match\('content=\"Microsoft OneNote'\)\|\|[\w$]+\)return!0;)"
+            r'(?P<tail>if\([\w$]+&&!(?P<S>[\w$]+)\.opts\.imageUploadURL\))'
+        ),
+        paste_whole_copy_files_manager,
+        lambda c: 'frFmCopy' in c,
+    )
+
+
+# ── Fix 54: core bundles — an event on a text node reaches delegated handlers ─
+#
+# Froala's event helper runs a delegated handler for each element between the
+# event's target and the element listening, testing each one with
+# Element.prototype.matches. A browser can aim an event at a text node (Chrome
+# does for a drag of selected text, and extensions dispatch mouse events on
+# text), and matches on a text node throws "TypeError: Illegal invocation":
+# the editor's handlers for that event stopped, and LogRocket recorded it in
+# four composer sessions in a week. Start from the text node's element, as
+# jQuery does, and test elements only.
+#
+# Upstream pattern (variable names change each release):
+#   return function(e){var t=e.target;if(o)for(o=T(o);t&&t!==this;)Element.prototype.matches.call(t,T(o))&&…
+#
+# Fixed pattern:
+#   return function(e){var t=e.target;t&&3===t.nodeType&&(t=t.parentNode);if(o)for(o=T(o);t&&t!==this;)
+#     1===t.nodeType&&Element.prototype.matches.call(t,T(o))&&…
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f'{core_bundle}: an event on a text node reaches delegated handlers',
+        re.compile(
+            r'return function\(([\w$]+)\)\{var ([\w$]+)=\1\.target;if\(([\w$]+)\)for\(\3=([\w$]+)\(\3\);\2&&\2!==this;\)'
+            r'Element\.prototype\.matches\.call\(\2,'
+        ),
+        lambda m: (
+            f'return function({m[1]}){{var {m[2]}={m[1]}.target;{m[2]}&&3==={m[2]}.nodeType&&({m[2]}={m[2]}.parentNode);'
+            f'if({m[3]})for({m[3]}={m[4]}({m[3]});{m[2]}&&{m[2]}!==this;)1==={m[2]}.nodeType&&Element.prototype.matches.call({m[2]},'
+        ),
+        lambda c: re.search(r'&&3===[\w$]+\.nodeType&&\([\w$]+=[\w$]+\.parentNode\);if\(', c) is not None,
+    )
+    # $(target).closest(…) (the table plugin's mousedown and mouseup) asks a text node too: start from its element.
+    apply_fix(
+        core_bundle,
+        f'{core_bundle}: closest() of a text node starts from its element',
+        re.compile(r'closest:function\(([\w$]+)\)\{for\(var ([\w$]+)=0;\2<this\.length;\2\+\+\)\{var ([\w$]+)=Element\.prototype\.closest\.call\(this\[\2\],\1\);'),
+        lambda m: (
+            f'closest:function({m[1]}){{for(var {m[2]}=0;{m[2]}<this.length;{m[2]}++){{var frNode=this[{m[2]}];'
+            f'frNode&&1!==frNode.nodeType&&(frNode=frNode.parentElement);var {m[3]}=frNode&&Element.prototype.closest.call(frNode,{m[1]});'
+        ),
+        lambda c: 'var frNode=this[' in c,
+    )
+
+
+# ── Fix 55: core bundles — Backspace's keyup tidies only a caret in the editor ─
+#
+# On keyup the keys module tidies the invisible spaces around the caret: when
+# the caret's element holds a zero-width space besides other content, it saves
+# the selection, and for Backspace at the top of an ENTER_BR editor reads the
+# end marker's next sibling before it tidies and restores. With no selection in
+# the document (or one outside this editor), selection.element() falls back to
+# the editor itself and save() places no marker, so the keyup threw "Cannot
+# read properties of undefined (reading 'nextSibling')". PA's signature caret
+# (<span data-pa-signature-caret>, a zero-width space) is always at the top of
+# a composer, so every such Backspace keyup threw (LogRocket, a composer session
+# on 2026-11-06: ICAN's pitch, a press release in a table). There is no caret to
+# tidy around then: the tidy runs only for a selection in this editor. save()
+# can still fail for a caret in it (a marker it cannot place: it then removes
+# them all), and an end marker missing is the same: nothing to tidy.
+#
+# Upstream pattern (variable names change each release):
+#   ||(g.selection.save(),n=g.$el.find(".fr-marker")[1],e=(e||"").which,g.opts.enter===Z.ENTER_BR&&t===g.$el.get(0)&&8===e&&null==n.nextSibling||T(t),g.selection.restore())
+#
+# Fixed pattern:
+#   ||!g.selection.inEditor()||(g.selection.save(),n=…[1],…&&8===e&&(!n||null==n.nextSibling)||T(t),g.selection.restore())
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f"{core_bundle}: Backspace's keyup tidies only a caret in the editor",
+        re.compile(
+            r'\|\|\((([\w$]+)\.selection\.save\(\),(([\w$]+)=\2\.\$el\.find\("\.fr-marker"\)\[1\],[^;]{0,120}?8===[\w$]+&&))null==\4\.nextSibling\|\|'
+        ),
+        lambda m: f'||!{m[2]}.selection.inEditor()||({m[1]}(!{m[4]}||null=={m[4]}.nextSibling)||',
+        lambda c: re.search(
+            r'\|\|![\w$]+\.selection\.inEditor\(\)\|\|\([\w$]+\.selection\.save\(\),[\w$]+=[\w$]+\.\$el\.find\("\.fr-marker"\)\[1\],[^;]{0,120}?8===[\w$]+&&\(![\w$]+\|\|null==',
+            c,
+        )
+        is not None,
+    )
+
+
+# ── Fix 56: core bundles — a space before more of the line stays a space ─────
+#
+# spaces.normalize turns a text node's trailing space into &nbsp; when the node
+# has no next sibling, taking it for the end of the line. The last text of an
+# inline element has none: in <span>Hello </span><b>World</b> the space is
+# followed by World on the same line, yet it became &nbsp;. Every paste from
+# Google Docs, Word or another page wraps its runs in such spans, so the words
+# at each formatting boundary were glued by &nbsp; (they no longer wrap in the
+# email sent), and a merge tag copied in the editor came back after "Hello&nbsp;"
+# whenever the paste used the browser's HTML instead of Froala's own copy.
+# What follows the text is the next sibling of its first inline ancestor that
+# has one, short of the block: the rule looks at that. The leading space is the
+# same the other way: <span>Bold</span><span> normal</span> kept "Bold&nbsp;normal"
+# because the rule that gives a leading &nbsp; its space back looked only at the
+# text's own previous sibling.
+#
+# Upstream pattern (variable names change each release):
+#   function o(e,t){var n=e.previousSibling,o=e.nextSibling,…;if(!p.html.isPreformatted(i)){
+#   … !(!o||p.node.isBlock(o)||o&&o.nodeType===Node.ELEMENT_NODE&&p.win.getComputedStyle(o)&&"block"===p.win.getComputedStyle(o).display) …
+#
+# Fixed pattern:
+#   …if(!p.html.isPreformatted(i)){var frNext=o||…(e),frPrev=n||…(e);
+#   … !(!frNext||p.node.isBlock(frNext)||…getComputedStyle(frNext)…) …
+#   … !frPrev||p.node.isVoid(frPrev)||p.node.isBlock(frPrev)||1!==(d=d.replace(/^\u00A0([^ $])/," $1")).length …
+
+for core_bundle in (
+    "js/froala_editor.min.js",
+    "js/froala_editor.pkgd.min.js",
+):
+    apply_fix(
+        core_bundle,
+        f"{core_bundle}: the next content of a text node's inline ancestors",
+        re.compile(
+            r'(function [\w$]+\(([\w$]+),[\w$]+\)\{var (?P<prev>[\w$]+)=\2\.previousSibling,([\w$]+)=\2\.nextSibling,[\w$]+=\2\.textContent,([\w$]+)=\2\.parentNode,[\w$]+=\[[^\]]*\];if\(!([\w$]+)\.html\.isPreformatted\(\5\)\)\{)'
+        ),
+        lambda m: (
+            f'{m[1]}var frNext={m[4]}||function(x){{for(;!x.nextSibling&&x.parentNode&&x.parentNode!=={m[6]}.el'
+            f'&&!{m[6]}.node.isBlock(x.parentNode);)x=x.parentNode;return x!=={m[2]}?x.nextSibling:null}}({m[2]}),'
+            f'frPrev={m[3]}||function(x){{for(;!x.previousSibling&&x.parentNode&&x.parentNode!=={m[6]}.el'
+            f'&&!{m[6]}.node.isBlock(x.parentNode);)x=x.parentNode;return x!=={m[2]}?x.previousSibling:null}}({m[2]});'
+        ),
+        lambda c: 'var frNext=' in c,
+    )
+    apply_fix(
+        core_bundle,
+        f"{core_bundle}: a space before more of the line stays a space",
+        re.compile(
+            r'!\(!([\w$]+)\|\|([\w$]+)\.node\.isBlock\(\1\)\|\|\1&&\1\.nodeType===Node\.ELEMENT_NODE&&\2\.win\.getComputedStyle\(\1\)&&"block"===\2\.win\.getComputedStyle\(\1\)\.display\)'
+        ),
+        lambda m: (
+            f'!(!frNext||{m[2]}.node.isBlock(frNext)||frNext.nodeType===Node.ELEMENT_NODE&&'
+            f'{m[2]}.win.getComputedStyle(frNext)&&"block"==={m[2]}.win.getComputedStyle(frNext).display)'
+        ),
+        lambda c: '!(!frNext||' in c,
+    )
+
+    apply_fix(
+        core_bundle,
+        f"{core_bundle}: a leading space after more of the line gets its space back",
+        re.compile(
+            r'!([\w$]+)\|\|([\w$]+)\.node\.isVoid\(\1\)\|\|\2\.node\.isBlock\(\1\)\|\|1!==\(([\w$]+)=\3\.replace\(/\^\\u00A0\(\[\^ \$\]\)/," \$1"\)\)\.length'
+        ),
+        lambda m: (
+            f'!frPrev||{m[2]}.node.isVoid(frPrev)||{m[2]}.node.isBlock(frPrev)||1!==({m[3]}={m[3]}'
+            f'.replace(/^\\u00A0([^ $])/," $1")).length'
+        ),
+        lambda c: '!frPrev||' in c,
     )
 
 
